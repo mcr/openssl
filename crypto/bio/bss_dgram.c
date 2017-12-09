@@ -315,6 +315,155 @@ static void dgram_reset_rcv_timeout(BIO *b)
 # endif
 }
 
+#if defined(HAVE_IP_PKTINFO)
+/* LINUX has IP_PKTINFO for IPv4 */
+static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
+                                     int flags,
+                                     BIO_ADDR *dstaddr, BIO_ADDR *peer)
+{
+    int len = 0;
+    unsigned char    chdr[CMSG_SPACE(sizeof(struct in_pktinfo))];
+    struct iovec iov;
+    struct msghdr mhdr;
+    struct in_pktinfo *pkt_info;
+    struct cmsghdr *cmsg;
+    int val;
+
+    /* enable PKTINFO receive */
+    val = 1;
+    if(setsockopt(b->num, IPPROTO_IP, IP_PKTINFO, &val, sizeof(val)) < 0) {
+      return -1;
+    }
+
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_len  = inl;
+    iov.iov_base = (caddr_t) in;
+
+    memset(&mhdr, 0, sizeof(mhdr));
+    mhdr.msg_name = (caddr_t)BIO_ADDR_sockaddr(peer);
+    mhdr.msg_namelen = sizeof(struct sockaddr_in);
+    mhdr.msg_iov = &iov;
+    mhdr.msg_iovlen = 1;
+
+    if(dstaddr) {
+      memset(chdr, 0, sizeof(chdr));
+      cmsg = (struct cmsghdr *) chdr;
+      mhdr.msg_control = (void *) cmsg;
+      mhdr.msg_controllen = sizeof(chdr);
+    }
+
+    pkt_info = NULL;
+    if((len = recvmsg(b->num, &mhdr, 0)) >= 0) {
+        for (cmsg = CMSG_FIRSTHDR(&mhdr);
+             cmsg != NULL;
+             cmsg = CMSG_NXTHDR(&mhdr, cmsg))
+	{
+            if (cmsg->cmsg_level != IPPROTO_IP)
+          	continue;
+            switch(cmsg->cmsg_type) {
+            case IP_PKTINFO:
+              pkt_info = (struct in_pktinfo *)CMSG_DATA(cmsg);
+              break;
+            }
+	}
+
+        /* see if we found something */
+        if(pkt_info != NULL && dstaddr != NULL) {
+          dstaddr->s_in.sin_family = AF_INET;
+          dstaddr->s_in.sin_addr = pkt_info->ipi_addr;
+        }
+    }
+
+    /* NOTE: peer was filled in by kernel */
+    return len;
+}
+
+#else
+static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
+                                         int flags,
+                                         BIO_ADDR *dstaddr, BIO_ADDR *peer)
+{
+    struct sockaddr_in addr;
+    bio_dgram_data *data = (bio_dgram_data *)b->ptr;
+    socklen_t len = sizeof(addr);
+    unsigned int ret;
+
+    memset((void *)&addr, 0, sizeof(addr));
+    ret = recvfrom(b->num, out, outl, flags, &addr, &len);
+
+    if(ret > 0) {
+      /* successs! */
+      BIO_set_dgram_origin(b, &addr);
+    }
+    return ret;
+}
+#endif
+
+#ifdef AF_INET6
+static int dgram_read_unconnected_v6(BIO *b, char *in, int inl,
+                                     int flags,
+                                     BIO_ADDR *dstaddr, BIO_ADDR *peer)
+{
+    int len = 0;
+    //unsigned int     chdrlen = CMSG_SPACE(sizeof(struct in6_pktinfo));
+    unsigned char    chdr[CMSG_SPACE(sizeof(struct in6_pktinfo))];
+    struct iovec iov;
+    struct msghdr mhdr;
+    struct in6_pktinfo *pkt_info;
+    struct cmsghdr *cmsg;
+    int val;
+
+    /* enable PKTINFO receive */
+    val = 1;
+    if(setsockopt(b->num, IPPROTO_IPV6, IPV6_RECVPKTINFO, &val, sizeof(val)) < 0) {
+      return -1;
+    }
+
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_len  = inl;
+    iov.iov_base = (caddr_t) in;
+
+    memset(&mhdr, 0, sizeof(mhdr));
+    mhdr.msg_name = (caddr_t)BIO_ADDR_sockaddr(peer);
+    mhdr.msg_namelen = sizeof(struct sockaddr_in6);
+    mhdr.msg_iov = &iov;
+    mhdr.msg_iovlen = 1;
+
+    if(dstaddr) {
+      memset(chdr, 0, sizeof(chdr));
+      cmsg = (struct cmsghdr *) chdr;
+      mhdr.msg_control = (void *) cmsg;
+      mhdr.msg_controllen = sizeof(chdr);
+    }
+
+    pkt_info = NULL;
+    if((len = recvmsg(b->num, &mhdr, 0)) >= 0) {
+        for (cmsg = CMSG_FIRSTHDR(&mhdr);
+             cmsg != NULL;
+             cmsg = CMSG_NXTHDR(&mhdr, cmsg))
+	{
+            if (cmsg->cmsg_level != IPPROTO_IPV6)
+          	continue;
+            switch(cmsg->cmsg_type) {
+            case IPV6_PKTINFO:
+              pkt_info = (struct in6_pktinfo *)CMSG_DATA(cmsg);
+              break;
+            }
+	}
+
+        /* see if we found something */
+        if(pkt_info != NULL && dstaddr != NULL) {
+          unsigned int dst_len = BIO_ADDR_sockaddr_size(dstaddr);
+          if(dst_len > sizeof(pkt_info->ipi6_addr)) dst_len = sizeof(pkt_info->ipi6_addr);
+          memcpy(BIO_ADDR_sockaddr_noconst(dstaddr), &pkt_info->ipi6_addr, dst_len);
+        }
+    }
+
+    /* NOTE: peer was filled in by kernel */
+    return len;
+}
+#endif
+
 static int dgram_read(BIO *b, char *out, int outl)
 {
     int ret = 0;
@@ -322,19 +471,44 @@ static int dgram_read(BIO *b, char *out, int outl)
     int flags = 0;
 
     BIO_ADDR peer;
-    socklen_t len = sizeof(peer);
+    BIO_ADDR addr;
 
     if (out != NULL) {
+        struct sockaddr *sa;
+
+        /* make sure we know something about the socket */
+	if(data->addr.sa.sa_family == 0) {
+		dgram_get_sockname(b);
+	}
+
+        sa = (struct sockaddr *)BIO_ADDR_sockaddr(&data->addr);
+
         clear_socket_error();
         memset(&peer, 0, sizeof(peer));
+        memset(&addr, 0, sizeof(addr));
         dgram_adjust_rcv_timeout(b);
         if (data->peekmode)
             flags = MSG_PEEK;
-        ret = recvfrom(b->num, out, outl, flags,
-                       BIO_ADDR_sockaddr_noconst(&peer), &len);
 
-        if (!data->connected && ret >= 0)
+        switch(sa->sa_family) {
+        case AF_INET:
+          ret = dgram_read_unconnected_v4(b, out, outl, flags, &addr, &peer);
+          break;
+
+#ifdef AF_INET6
+        case AF_INET6:
+          ret = dgram_read_unconnected_v6(b, out, outl, flags, &addr, &peer);
+          break;
+#endif /* AF_INET6 */
+
+        default:
+          ret = -1;
+        }
+
+        if (!data->connected && ret >= 0) {
+            BIO_ctrl(b, BIO_CTRL_DGRAM_SET_ADDR, 0, &addr);
             BIO_ctrl(b, BIO_CTRL_DGRAM_SET_PEER, 0, &peer);
+        }
 
         BIO_clear_retry_flags(b);
         if (ret < 0) {
@@ -591,7 +765,7 @@ static long dgram_get_mtu_overhead(bio_dgram_data *data)
 static int dgram_get_sockname(BIO *b)
 {
     bio_dgram_data *data = NULL;
-    socklen_t addr_len = 0;
+    socklen_t addr_len = sizeof(bio_dgram_data);
 
     data = (bio_dgram_data *)b->ptr;
 
