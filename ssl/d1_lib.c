@@ -450,8 +450,8 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
     int next, n, clearpkt = 0;
     unsigned char cookie[DTLS1_COOKIE_LENGTH];
     unsigned char seq[SEQ_NUM_SIZE];
-    const unsigned char *data;
     unsigned char *buf, *wbuf;
+    const unsigned char *data;
     size_t fragoff, fraglen, msglen, reclen, align = 0;
     unsigned int rectype, versmajor, msgseq, msgtype, clientvers, cookielen;
     BIO_ADDR *tmpclient = NULL;
@@ -918,9 +918,7 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client)
     BIO *rbio,   *wbio;
     BIO *rbio_c, *wbio_c;
     SSL3_BUFFER *rb;
-    int  rfd, wfd;
-    unsigned char *addrbuf, *sockname;
-    size_t addrlen;
+    int  rfd = -1, wfd = -1;
 
     ouraddr = BIO_ADDR_new();
     if(ouraddr == NULL) goto end;
@@ -967,12 +965,10 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client)
 
     BIO_ctrl(SSL_get_rbio(serv), BIO_CTRL_DGRAM_SET_PEEK_MODE, 0, NULL);
 
-    /* dump the data out of the old socket */
-    BIO_read(rbio, serv->init_buf->data, SSL3_RT_MAX_PLAIN_LENGTH);
-
     /*
      * Set expected sequence numbers to continue the handshake.
      */
+    SSL_set_accept_state(connection);
     connection->d1->handshake_read_seq = 1;
     connection->d1->handshake_write_seq = 1;
     connection->d1->next_handshake_write_seq = 1;
@@ -996,8 +992,12 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client)
     /* see if there an FD burried in the rbio */
     rbio_c = SSL_get_rbio(connection);
     wbio_c = SSL_get_wbio(connection);
-    rfd    = BIO_get_fd(rbio_c, NULL);
-    wfd    = BIO_get_fd(wbio_c, NULL);
+    if(rbio_c) {
+      rfd    = BIO_get_fd(rbio_c, NULL);
+    }
+    if(wbio_c) {
+      wfd    = BIO_get_fd(wbio_c, NULL);
+    }
 
     /* dig the address peers out of s */
     if (BIO_dgram_get_peer(rbio, client) <= 0)
@@ -1010,27 +1010,23 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client)
       int socket_type = SOCK_DGRAM;
       int family      = BIO_ADDR_family(client);
       int protocol    = 0;  /* UDP has nothing here */
+      int one         = 1;
 
       rfd = socket(family, socket_type, protocol);
-      BIO_set_fd(rbio_c, rfd, 0);
-      BIO_set_fd(wbio_c, rfd, 0);
+      if(setsockopt(rfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) != 0) {
+        goto end;
+      }
       wfd = rfd;
     }
 
-    /* find out size of addrbuf needed */
-    if(BIO_ADDR_rawaddress(client,   &addrbuf,  &addrlen)==0) {
+    if(bind(rfd,BIO_ADDR_sockaddr(ouraddr),BIO_ADDR_sockaddr_size(ouraddr)) != 0){
       goto end;
     }
-    if(BIO_ADDR_rawaddress(ouraddr,  &sockname, &addrlen)==0) {
+    if(connect(rfd,BIO_ADDR_sockaddr(client),BIO_ADDR_sockaddr_size(client)) != 0) {
       goto end;
     }
 
-    if(connect(rfd, (struct sockaddr *)addrbuf, addrlen) != 0) {
-      goto end;
-    }
-    if(bind(rfd, (struct sockaddr *)sockname, addrlen) != 0) {
-      goto end;
-    }
+    SSL_set_fd(connection, rfd);
 
     ret = 1;
 
