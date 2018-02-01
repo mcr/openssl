@@ -24,9 +24,9 @@
 #include <errno.h>
 #include <signal.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
-#include <netinet/in.h>
 
 #include "bio_lcl.h"
 
@@ -64,6 +64,7 @@ static long dgram_ctrl(BIO *h, int cmd, long arg1, void *arg2);
 static int dgram_new(BIO *h);
 static int dgram_free(BIO *data);
 static int dgram_clear(BIO *bio);
+static int dgram_get_sockname(BIO *bio);
 
 # ifndef OPENSSL_NO_SCTP
 static int dgram_sctp_write(BIO *h, const char *buf, int num);
@@ -376,7 +377,7 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
     mhdr.msg_iovlen = 1;
 
     srcaddr = (struct sockaddr_in *)BIO_ADDR_sockaddr(&data->addr);
-    if(srcaddr) {
+    if(srcaddr && srcaddr->sin_addr.s_addr != 0) {
       memset(chdr, 0, sizeof(chdr));
 
       mhdr.msg_control = (void *) chdr;
@@ -391,6 +392,56 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
       pkt_info->ipi_addr    = srcaddr->sin_addr;
       mhdr.msg_controllen = CMSG_SPACE(sizeof(struct in_pktinfo));
       //printf("controllen: %d\n", mhdr.msg_controllen);
+    }
+
+    return sendmsg(b->num, &mhdr, 0);
+}
+#elif defined(HAVE_IP_RECVDSTADDR)
+/* FREEBSD, DragonFly, NetBSD, OpenBSD, probably BSDi */
+/*    implies IP_SENDSRCADDR is available too         */
+static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
+{
+    struct sockaddr_in addr;
+    struct sockaddr_in *srcaddr;
+    struct in_addr     *origaddr;
+    struct msghdr mhdr;
+    struct cmsghdr *cmsg;
+    struct iovec iov;
+
+    /* CMSG_SOCKET is from sys/socket.h, and makes
+     * space for a cmsghdr as well as alignment
+     */
+    char chdr[CMSG_SPACE(sizeof(struct in_addr))];
+    bio_dgram_data *data = (bio_dgram_data *)b->ptr;
+
+    memset((void *)&addr, 0, sizeof(addr));
+    addr = *(struct sockaddr_in *)BIO_ADDR_sockaddr(&data->peer);
+
+    iov.iov_len  = outl;
+    iov.iov_base = (caddr_t) out;
+
+    memset(&mhdr, 0, sizeof(mhdr));
+    mhdr.msg_name = (caddr_t)&addr;
+    mhdr.msg_namelen = sizeof(struct sockaddr_in);
+    mhdr.msg_iov = &iov;
+    mhdr.msg_iovlen = 1;
+
+    srcaddr = (struct sockaddr_in *)BIO_ADDR_sockaddr(&data->addr);
+    if(srcaddr && srcaddr->sin_addr.s_addr != 0) {
+      memset(chdr, 0, sizeof(chdr));
+
+      mhdr.msg_control = (void *) chdr;
+      mhdr.msg_controllen = sizeof(chdr);
+
+      cmsg = CMSG_FIRSTHDR(&mhdr);
+      cmsg->cmsg_len = CMSG_LEN(sizeof(*origaddr));
+      cmsg->cmsg_level = IPPROTO_IP;
+      cmsg->cmsg_type  = IP_SENDSRCADDR;
+
+      origaddr = (struct in_addr *) CMSG_DATA(cmsg);
+      *origaddr= srcaddr->sin_addr;
+      mhdr.msg_controllen = CMSG_SPACE(sizeof(*origaddr));
+      printf("controllen: %d\n", mhdr.msg_controllen);
     }
 
     return sendmsg(b->num, &mhdr, 0);
@@ -467,6 +518,9 @@ static int dgram_write(BIO *b, const char *in, int inl)
         ret = writesocket(b->num, in, inl);
     else {
         struct sockaddr *sa = (struct sockaddr *)BIO_ADDR_sockaddr(&data->peer);
+	if(data->addr.sa.sa_family == 0) {
+		dgram_get_sockname(b);
+	}
 
         switch(sa->sa_family) {
         case AF_INET:
@@ -532,6 +586,19 @@ static long dgram_get_mtu_overhead(bio_dgram_data *data)
         break;
     }
     return ret;
+}
+
+static int dgram_get_sockname(BIO *b)
+{
+    bio_dgram_data *data = NULL;
+    socklen_t addr_len = 0;
+
+    data = (bio_dgram_data *)b->ptr;
+
+    if (getsockname(b->num, (struct sockaddr *)&data->addr, &addr_len) < 0) {
+	return 0;
+    }
+    return addr_len;
 }
 
 static long dgram_ctrl(BIO *b, int cmd, long num, void *ptr)
@@ -719,12 +786,17 @@ static long dgram_ctrl(BIO *b, int cmd, long num, void *ptr)
             num = ret;
         memcpy(ptr, &data->peer, (ret = num));
         break;
+
     case BIO_CTRL_DGRAM_SET_PEER:
         BIO_ADDR_make(&data->peer, BIO_ADDR_sockaddr((BIO_ADDR *)ptr));
         break;
 
     case BIO_CTRL_DGRAM_GET_ADDR:
         ret = BIO_ADDR_sockaddr_size(&data->addr);
+	if(ret == 0) { /* never set, retrieve it */
+		ret = dgram_get_sockname(b);
+	}
+
         /* FIXME: if num < ret, we will only return part of an address.
            That should bee an error, no? */
         if (num == 0 || num > ret)
