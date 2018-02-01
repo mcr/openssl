@@ -15,7 +15,10 @@
 #include <errno.h>
 
 // MCR try just this: #include "bio_local.h"
+/* this is needed on Linux to get in6_pktinfo to be defined */
 #define __USE_GNU
+
+#include <sys/types.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <errno.h>
@@ -345,6 +348,8 @@ static int dgram_read(BIO *b, char *out, int outl)
     return ret;
 }
 
+#if defined(HAVE_IP_PKTINFO)
+/* LINUX has IP_PKTINFO for IPv4 */
 static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
 {
     struct sockaddr_in addr;
@@ -390,6 +395,23 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
 
     return sendmsg(b->num, &mhdr, 0);
 }
+#else
+
+/*
+ * this version send things with sendto(3), which is unable to
+ * set the originating address at all.
+ */
+static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
+{
+    struct sockaddr_in addr;
+    bio_dgram_data *data = (bio_dgram_data *)b->ptr;
+
+    memset((void *)&addr, 0, sizeof(addr));
+    addr = *(struct sockaddr_in *)BIO_ADDR_sockaddr(&data->peer);
+
+    return sendto(b->num, out, outl, &addr, sizeof(addr));
+}
+#endif
 
 #ifdef AF_INET6
 static int dgram_write_unconnected_v6(BIO *b, const char *out, int outl)
