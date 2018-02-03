@@ -377,7 +377,72 @@ static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
     /* NOTE: peer was filled in by kernel */
     return len;
 }
+#elif defined(HAVE_IP_RECVDSTADDR)
+/* FREEBSD, DragonFly, NetBSD, OpenBSD, probably BSDi */
+/*    implies IP_SENDSRCADDR is available too         */
+static int dgram_read_unconnected_v4(BIO *b, const char *in, int inl,
+                                     int flags,
+                                     BIO_ADDR *dstaddr, BIO_ADDR *peer)
 
+{
+    int len = 0;
+    /* RFC2292 says CMSG_SPACE is guaranteed to evaluate to a constant */
+    unsigned char    chdr[CMSG_SPACE(sizeof(struct in_addr))];
+    struct iovec iov;
+    struct msghdr mhdr;
+    struct in_addr *dstrecv;
+    struct cmsghdr *cmsg;
+    int val;
+
+    /* enable RECVDSTADDR receive */
+    val = 1;
+    /* XXX should be cached to avoid a syscall */
+    if(setsockopt(b->num, IPPROTO_IP, IP_RECVDSTADDR, &val, sizeof(val)) < 0) {
+      return -1;
+    }
+
+    memset(&iov, 0, sizeof(iov));
+    iov.iov_len  = inl;
+    iov.iov_base = (caddr_t) in;
+
+    memset(&mhdr, 0, sizeof(mhdr));
+    mhdr.msg_name = (caddr_t)BIO_ADDR_sockaddr(peer);
+    mhdr.msg_namelen = sizeof(struct sockaddr_in);
+    mhdr.msg_iov = &iov;
+    mhdr.msg_iovlen = 1;
+
+    if(dstaddr) {
+      memset(chdr, 0, sizeof(chdr));
+      cmsg = (struct cmsghdr *) chdr;
+      mhdr.msg_control = (void *) cmsg;
+      mhdr.msg_controllen = sizeof(chdr);
+    }
+
+    dstaddr = NULL;
+    if((len = recvmsg(b->num, &mhdr, 0)) >= 0) {
+        for (cmsg = CMSG_FIRSTHDR(&mhdr);
+             cmsg != NULL;
+             cmsg = CMSG_NXTHDR(&mhdr, cmsg))
+	{
+            if (cmsg->cmsg_level != IPPROTO_IP)
+          	continue;
+            switch(cmsg->cmsg_type) {
+            case IP_RECVDSTADDR:
+              dstrecv = (struct in_addr *)CMSG_DATA(cmsg);
+              break;
+            }
+	}
+
+        /* see if we found something */
+        if(dstrecv != NULL && dstaddr != NULL) {
+          dstaddr->s_in.sin_family = AF_INET;
+          dstaddr->s_in.sin_addr   =*dstrecv;
+        }
+    }
+
+    /* NOTE: peer was filled in by kernel */
+    return len;
+}
 #else
 static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
                                          int flags,
