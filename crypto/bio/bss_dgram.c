@@ -470,7 +470,6 @@ static int dgram_read_unconnected_v6(BIO *b, char *in, int inl,
                                      BIO_ADDR *dstaddr, BIO_ADDR *peer)
 {
     int len = 0;
-    //unsigned int     chdrlen = CMSG_SPACE(sizeof(struct in6_pktinfo));
     unsigned char    chdr[CMSG_SPACE(sizeof(struct in6_pktinfo))];
     struct iovec iov;
     struct msghdr mhdr;
@@ -630,7 +629,9 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
       pkt_info = (struct in_pktinfo *)CMSG_DATA(cmsg);
       pkt_info->ipi_addr    = srcaddr->sin_addr;
       mhdr.msg_controllen = CMSG_SPACE(sizeof(struct in_pktinfo));
-      //printf("controllen: %d\n", mhdr.msg_controllen);
+#if 0
+      printf("controllen: %d\n", mhdr.msg_controllen);
+#endif
     }
 
     return sendmsg(b->num, &mhdr, 0);

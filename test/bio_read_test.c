@@ -38,8 +38,9 @@ static int read_socket_and_discard(int fd, int count, unsigned portnum)
 {
   char buf[512];
   BIO  *in;
-  int  ret;
+  int  ret = 0;
   BIO_ADDR *ba;
+  unsigned short port;
 
   /* do not wait forever! */
   alarm(60);
@@ -52,7 +53,7 @@ static int read_socket_and_discard(int fd, int count, unsigned portnum)
 
     /* now check out the bio structure for the origin of the packet */
     BIO_get_dgram_origin(in, ba);
-    unsigned short port = ntohs(BIO_ADDR_rawport(ba));
+    port = ntohs(BIO_ADDR_rawport(ba));
     if(port!=0 && port != portnum) { exit(5); }
   }
 
@@ -69,6 +70,7 @@ static int write_packets(BIO *bio, int count, BIO_ADDR *dst1, BIO_ADDR *dst2)
 {
   const char hello[]="hellohellohello";
   int toggle = 0;
+  int ret;
 
   while(--count > 0) {
     const int sizeofhello = sizeof(hello);
@@ -79,7 +81,7 @@ static int write_packets(BIO *bio, int count, BIO_ADDR *dst1, BIO_ADDR *dst2)
       BIO_set_dgram_dest(bio, dst1);
     }
 
-    int ret = BIO_write(bio, hello, sizeofhello);
+    ret = BIO_write(bio, hello, sizeofhello);
     if(ret != sizeofhello) {
       exit(3);
     }
@@ -146,7 +148,9 @@ static unsigned int bind_v4_socket(int infd,
     perror("getsockname");
     exit(5);
   }
-  //printf("bound to port: %u\n", ntohs(localhost.sin_port));
+#if 0
+  printf("bound to port: %u\n", ntohs(localhost.sin_port));
+#endif
   BIO_ADDR_rawmake(dsthost, AF_INET,
                    &localhost.sin_addr, sizeof(localhost.sin_addr),
                    localhost.sin_port);
@@ -199,7 +203,9 @@ static unsigned int bind_v6_socket(int infd,
     exit(5);
   }
 
-  //printf("bound to v6 port: %u\n", ntohs(localhost.sin6_port));
+#if 0
+  printf("bound to v6 port: %u\n", ntohs(localhost.sin6_port));
+#endif
 
   BIO_ADDR_rawmake(dsthost, AF_INET6,
                    &localhost.sin6_addr, sizeof(localhost.sin6_addr),
