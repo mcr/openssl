@@ -24,7 +24,7 @@
 #endif
 
 #include <sys/types.h>
-#ifdef WIN32
+#if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -488,7 +488,7 @@ static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
 /* on Windows, RFC3542 is not implemented correctly, instead
  * WSARecvMsg must be used rather than recvmsg
  */
-#if defined(AF_INET6) && !defined(WIN32)
+#if defined(AF_INET6) && !defined(_WIN32)
 static int dgram_read_unconnected_v6(BIO *b, char *in, int inl,
                                      int flags,
                                      BIO_ADDR *dstaddr, BIO_ADDR *peer)
@@ -747,7 +747,7 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
 }
 #endif
 
-#if defined(AF_INET6) && !defined(WIN32)
+#if defined(AF_INET6) && !defined(_WIN32)
 static int dgram_write_unconnected_v6(BIO *b, const char *out, int outl)
 {
     struct sockaddr_in6 addr;
