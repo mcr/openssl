@@ -345,7 +345,7 @@ static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
     unsigned char    chdr[BIO_CMSG_ADDR_SIZE];
     struct iovec iov;
     struct msghdr mhdr;
-    struct in_pktinfo *pkt_info;
+    struct in_pktinfo *pkt_info = NULL;
     struct cmsghdr *cmsg;
     int val;
 
@@ -365,14 +365,13 @@ static int dgram_read_unconnected_v4(BIO *b, char *in, int inl,
     mhdr.msg_iov = &iov;
     mhdr.msg_iovlen = 1;
 
-    if(dstaddr) {
+    if(dstaddr != NULL) {
       memset(chdr, 0, sizeof(chdr));
       cmsg = (struct cmsghdr *) chdr;
       mhdr.msg_control = (void *) cmsg;
       mhdr.msg_controllen = sizeof(chdr);
     }
 
-    pkt_info = NULL;
     if((len = recvmsg(b->num, &mhdr, 0)) >= 0) {
         for (cmsg = CMSG_FIRSTHDR(&mhdr);
              cmsg != NULL;
@@ -434,7 +433,7 @@ static int dgram_read_unconnected_v4(BIO *b, const char *in, int inl,
     mhdr.msg_iov = &iov;
     mhdr.msg_iovlen = 1;
 
-    if(dstaddr) {
+    if(dstaddr != NULL) {
       memset(chdr, 0, sizeof(chdr));
       cmsg = (struct cmsghdr *) chdr;
       mhdr.msg_control = (void *) cmsg;
@@ -498,7 +497,7 @@ static int dgram_read_unconnected_v6(BIO *b, char *in, int inl,
     unsigned char    chdr[BIO_CMSG_PKT6_SIZE];
     struct iovec iov;
     struct msghdr mhdr;
-    struct in6_pktinfo *pkt_info;
+    struct in6_pktinfo *pkt_info = NULL;
     struct cmsghdr *cmsg;
     int val;
 
@@ -518,14 +517,13 @@ static int dgram_read_unconnected_v6(BIO *b, char *in, int inl,
     mhdr.msg_iov = &iov;
     mhdr.msg_iovlen = 1;
 
-    if(dstaddr) {
+    if(dstaddr != NULL) {
       memset(chdr, 0, sizeof(chdr));
       cmsg = (struct cmsghdr *) chdr;
       mhdr.msg_control = (void *) cmsg;
       mhdr.msg_controllen = sizeof(chdr);
     }
 
-    pkt_info = NULL;
     if((len = recvmsg(b->num, &mhdr, 0)) >= 0) {
         for (cmsg = CMSG_FIRSTHDR(&mhdr);
              cmsg != NULL;
@@ -638,7 +636,6 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
 {
     struct sockaddr_in addr;
     struct sockaddr_in *srcaddr;
-    struct in_pktinfo *pkt_info;
     struct msghdr mhdr;
     struct cmsghdr *cmsg;
     struct iovec iov;
@@ -660,6 +657,7 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
 
     srcaddr = (struct sockaddr_in *)BIO_ADDR_sockaddr(&data->addr);
     if(srcaddr && srcaddr->sin_addr.s_addr != 0) {
+      struct in_pktinfo *pkt_info;
       memset(chdr, 0, sizeof(chdr));
 
       mhdr.msg_control = (void *) chdr;
@@ -754,7 +752,6 @@ static int dgram_write_unconnected_v6(BIO *b, const char *out, int outl)
 {
     struct sockaddr_in6 addr;
     struct sockaddr_in6 *srcaddr;
-    struct in6_pktinfo *pkt_info;
     struct msghdr mhdr;
     struct cmsghdr *cmsg;
     struct iovec iov;
@@ -775,6 +772,7 @@ static int dgram_write_unconnected_v6(BIO *b, const char *out, int outl)
 
     srcaddr = (struct sockaddr_in6 *)BIO_ADDR_sockaddr(&data->addr);
     if(srcaddr) {
+      struct in6_pktinfo *pkt_info;
       memset(chdr, 0, sizeof(chdr));
       cmsg = (struct cmsghdr *) chdr;
 
@@ -815,9 +813,8 @@ static int dgram_write(BIO *b, const char *in, int inl)
         ret = writesocket(b->num, in, inl);
     else {
         struct sockaddr *sa = (struct sockaddr *)BIO_ADDR_sockaddr(&data->peer);
-	if(data->addr.sa.sa_family == 0) {
-		dgram_get_sockname(b);
-	}
+	if(data->addr.sa.sa_family == 0)
+          dgram_get_sockname(b);
 
         switch(sa->sa_family) {
         case AF_INET:
@@ -1090,9 +1087,8 @@ static long dgram_ctrl(BIO *b, int cmd, long num, void *ptr)
 
     case BIO_CTRL_DGRAM_GET_ADDR:
         ret = BIO_ADDR_sockaddr_size(&data->addr);
-	if(ret == 0) { /* never set, retrieve it */
-		ret = dgram_get_sockname(b);
-	}
+	if(ret == 0) /* never set, retrieve it */
+          ret = dgram_get_sockname(b);
 
         /* FIXME: if num < ret, we will only return part of an address.
            That should bee an error, no? */
