@@ -132,9 +132,6 @@ static void bind_v4_socket(int infd,
     perror("getsockname");
     exit(5);
   }
-#if 0
-  printf("bound to port: %u\n", ntohs(localhost.sin_port));
-#endif
   BIO_ADDR_rawmake(dsthost, AF_INET,
                    &localhost.sin_addr, sizeof(localhost.sin_addr),
                    localhost.sin_port);
@@ -183,10 +180,6 @@ static void bind_v6_socket(int infd,
     perror("getsockname6");
     exit(5);
   }
-
-#if 0
-  printf("bound to v6 port: %u\n", ntohs(localhost.sin6_port));
-#endif
 
   BIO_ADDR_rawmake(dsthost, AF_INET6,
                    &localhost.sin6_addr, sizeof(localhost.sin6_addr),
