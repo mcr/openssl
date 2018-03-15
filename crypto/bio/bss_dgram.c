@@ -671,9 +671,6 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
       pkt_info = (struct in_pktinfo *)CMSG_DATA(cmsg);
       pkt_info->ipi_addr = srcaddr->sin_addr;
       mhdr.msg_controllen = CMSG_SPACE(sizeof(struct in_pktinfo));
-#if 0
-      printf("controllen: %d\n", mhdr.msg_controllen);
-#endif
     }
 
     return sendmsg(b->num, &mhdr, 0);
@@ -723,7 +720,6 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
       origaddr = (struct in_addr *)CMSG_DATA(cmsg);
       *origaddr = srcaddr->sin_addr;
       mhdr.msg_controllen = CMSG_SPACE(sizeof(*origaddr));
-      printf("controllen: %d\n", mhdr.msg_controllen);
     }
 
     return sendmsg(b->num, &mhdr, 0);
