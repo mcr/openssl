@@ -686,10 +686,6 @@ static int dgram_write_unconnected_v4(BIO *b, const char *out, int outl)
     struct msghdr mhdr;
     struct cmsghdr *cmsg;
     struct iovec iov;
-
-    /* CMSG_SOCKET is from sys/socket.h, and makes
-     * space for a cmsghdr as well as alignment
-     */
     char chdr[BIO_CMSG_ADDR_SIZE];
     bio_dgram_data *data = (bio_dgram_data *)b->ptr;
 
