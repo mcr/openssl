@@ -180,7 +180,7 @@ static int dtls_accept_test(int unused)
     /* spawn off some clients to connect to us */
     do_clients(ntohs(portnum));
 
-    /* kill self in 60s */
+    /* kill self in 60s if we do not exit correctly */
     alarm(60);
 
     while(client_count < CLIENT_TEST_COUNT &&
@@ -309,7 +309,7 @@ static int dtls_accept_test(int unused)
                   test_printf_stdout("want_x509_lookup %i:%i\n", i, err);
                   break;
                 case SSL_ERROR_SYSCALL:
-                  test_printf_stdout("syscall %i:%i\n", i, err);
+                  test_printf_stdout("syscall %i:%s\n", i, strerror(errno));
                   exit(12);
                 case SSL_ERROR_SSL:
                   test_printf_stdout("ssl error %i:%i\n", i, err);
