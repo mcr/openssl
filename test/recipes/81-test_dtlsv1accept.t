@@ -7,7 +7,7 @@
 # https://www.openssl.org/source/license.html
 
 
-use OpenSSL::Test;
+use OpenSSL::Test qw/:DEFAULT srctop_file/;
 use OpenSSL::Test::Utils;
 
 setup("test_accept_dtls");
