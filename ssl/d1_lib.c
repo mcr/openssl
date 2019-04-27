@@ -447,7 +447,8 @@ static void get_current_time(struct timeval *t)
 #ifndef OPENSSL_NO_SOCK
 int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
 {
-    int next, n, clearpkt = 0;
+    int next, n;
+    BUF_MEM *bufm;
     unsigned char cookie[DTLS1_COOKIE_LENGTH];
     unsigned char seq[SEQ_NUM_SIZE];
     unsigned char *buf, *wbuf;
@@ -473,8 +474,22 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
         /* SSLerr already called */
         return -1;
     }
-    buf = RECORD_LAYER_get_rbuf(&s->rlayer)->buf;
+    if (s->init_buf == NULL) {
+        if ((bufm = BUF_MEM_new()) == NULL) {
+            SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_MALLOC_FAILURE);
+            return -1;
+        }
+
+        if (!BUF_MEM_grow(bufm, SSL3_RT_MAX_PLAIN_LENGTH)) {
+            BUF_MEM_free(bufm);
+            SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_MALLOC_FAILURE);
+            return -1;
+        }
+        s->init_buf = bufm;
+    }
+    buf = (unsigned char *)s->init_buf->data;
     wbuf = RECORD_LAYER_get_wbuf(&s->rlayer)[0].buf;
+
 #if defined(SSL3_ALIGN_PAYLOAD)
 # if SSL3_ALIGN_PAYLOAD != 0
     /*
@@ -506,12 +521,6 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
         /* tell caller size of data in s->init_buf->data */
         s->init_num = n;
 
-        /*
-         * after this point, if we hit any problems we need to clear this packet
-         * from the BIO, because it was PEEK'ed at the socket level.
-         * if there are no problems, it is left in the socket for SSL_accept().
-         */
-        clearpkt = 1;
         if (!PACKET_buf_init(&pkt, buf, n)) {
             SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_INTERNAL_ERROR);
             return -1;
@@ -701,6 +710,7 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
             version = (s->method->version == DTLS_ANY_VERSION) ? DTLS1_VERSION
                                                                : s->version;
 
+
             /* Construct the record and message headers */
             if (!WPACKET_init_static_len(&wpkt,
                                          wbuf,
@@ -778,6 +788,26 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
             }
 
             /*
+             * Fix up the message len in the message header. Its the same as the
+             * fragment len which has been filled in by WPACKET, so just copy
+             * that. Destination for the message len is after the record header
+             * plus one byte for the message content type. The source is the
+             * last 3 bytes of the message header
+             */
+            memcpy(&wbuf[DTLS1_RT_HEADER_LENGTH + 1],
+                   &wbuf[DTLS1_RT_HEADER_LENGTH + DTLS1_HM_HEADER_LENGTH - 3],
+                   3);
+
+            if (s->msg_callback)
+                s->msg_callback(1, 0, SSL3_RT_HEADER, buf,
+                                DTLS1_RT_HEADER_LENGTH, s, s->msg_callback_arg);
+
+            if ((tmpclient = BIO_ADDR_new()) == NULL) {
+                SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_MALLOC_FAILURE);
+                goto end;
+            }
+
+            /*
              * This is unnecessary if rbio and wbio are one and the same - but
              * maybe they're not. We ignore errors here - some BIOs do not
              * support this.
@@ -821,10 +851,6 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
     return 1;
 
  end:
-    if (clearpkt) {
-        /* Dump this packet. Ignore return value */
-        BIO_read(rbio, buf, SSL3_RT_MAX_PLAIN_LENGTH);
-    }
     BIO_ADDR_free(tmpclient);
     return 0;
 }
@@ -887,7 +913,6 @@ int DTLSv1_listen(SSL *s, BIO_ADDR *client)
     ret = 1;
 
  end:
-    /* BIO_ctrl(SSL_get_rbio(s), BIO_CTRL_DGRAM_SET_PEEK_MODE, 0, NULL); */
     return ret;
 }
 
@@ -928,8 +953,9 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
     }
 
     /* Ensure there is no state left over from a previous invocation */
-    if (!SSL_clear(serv))
+    if (!SSL_clear(serv)) {
         return -1;
+    }
 
     ERR_clear_error();
 
@@ -961,8 +987,6 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
     memcpy(rb->buf, serv->init_buf->data, serv->init_num);
     rb->offset = 0;
     rb->left   = serv->init_num;
-
-    BIO_ctrl(SSL_get_rbio(serv), BIO_CTRL_DGRAM_SET_PEEK_MODE, 0, NULL);
 
     /*
      * Set expected sequence numbers to continue the handshake.
@@ -996,6 +1020,7 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
 
     /*
      * now set up a socket based upon the original rbio's peer/addr
+     * this requires that the new conn_fd is setup with SO_REUSEADDR.
      */
     if(bind(nfd,BIO_ADDR_sockaddr(ouraddr),BIO_ADDR_sockaddr_size(ouraddr)) != 0){
       goto end;
@@ -1013,7 +1038,6 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
     if(ouraddr) {
       BIO_ADDR_free(ouraddr);
     }
-    BIO_ctrl(SSL_get_rbio(serv), BIO_CTRL_DGRAM_SET_PEEK_MODE, 0, NULL);
     return ret;
 }
 #endif
