@@ -64,7 +64,12 @@ static void do_clients(int portnum)
   char b[512];
   /* apps/openssl s_client -dtls -connect localhost:40000  */
 
-  snprintf(b, 512, "echo hello | apps/openssl s_client -dtls -connect localhost:%u >/dev/null 2>&1", portnum);
+  /*
+   * screwing with PATH is to allow openssl to be found from the local directory,
+   * even though test case might be run from root, or from within the test/ directory
+   * due to gdb, etc.
+   */
+  snprintf(b, 512, "export PATH=apps:../apps:$PATH; echo hello | openssl s_client -dtls -connect localhost:%u >/dev/null 2>&1", portnum);
 
   for(i=0; i<CLIENT_TEST_COUNT; i++) {
     pid = fork();
@@ -72,8 +77,10 @@ static void do_clients(int portnum)
     case 0:
       /* child process */
       {
+        test_printf_stdout("pid=%u: starting client[%d]: %s\n", getpid(), i, b);
+        // for debugging
+        //system("ss -uan | grep 40000");
         sleep(3+(i*2));
-        test_printf_stdout("starting client %u: %s\n", getpid(), b);
         system(b);
         exit(0);
       }
@@ -195,7 +202,7 @@ static int dtls_accept_test(int unused)
       /* new connection found! */
       host = BIO_ADDR_hostname_string(peer, 0);
       port = BIO_ADDR_rawport(peer);
-      test_printf_stdout("\n%u: connection from %s:%u\n",
+      test_printf_stdout("\npid=%u %u: connection from %s:%u\n", getpid(),
                          client_count, host, ntohs(port));
 
       /* process this connection in a sub-process */
@@ -338,11 +345,16 @@ static int dtls_accept_test(int unused)
 
       /* create a fresh connection for next connection */
       SSL_free(connection);
+      close(conn_fd);
 
       if (!TEST_ptr(connection = SSL_new(ctx)))
         goto err;
+      conn_fd   = socket(family, socket_type, protocol);
+      if(conn_fd < 0) goto err;
+      if(setsockopt(conn_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) != 0) goto err;
     }
 
+    test_printf_stdout("ret: %d, client_count=%d\n", ret, client_count);
     {
       int i;
       for(i=0; i<CLIENT_TEST_COUNT; i++) {
