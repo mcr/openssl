@@ -446,7 +446,7 @@ static void get_current_time(struct timeval *t)
 #define LISTEN_SEND_VERIFY_REQUEST  1
 
 #ifndef OPENSSL_NO_SOCK
-int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
+int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
 {
     int next, n;
     BUF_MEM *bufm;
@@ -845,7 +845,7 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
     } while (next != LISTEN_SUCCESS);
 
     /* Buffer the record in the processed_rcds queue */
-    if (!dtls_buffer_listen_record(s, reclen, seq, align))
+    if (!dtls_buffer_listen_record(as, reclen, seq, align))
         return -1;
 
     BIO_ADDR_free(tmpclient);
@@ -881,7 +881,8 @@ int DTLSv1_listen(SSL *s, BIO_ADDR *client)
         return -1;
     }
 
-    if((ret = DTLSv1_answerHello(s, rbio, wbio)) != 1) {
+    /* answer SSL is same as s, for DTLSv1_listen() */
+    if((ret = DTLSv1_answerHello(s, s, rbio, wbio)) != 1) {
       goto end;
     }
 
@@ -929,11 +930,16 @@ int DTLSv1_listen(SSL *s, BIO_ADDR *client)
  * All packets in the socket will be processed until one is found with a valid
  * cookie.  Once that is found, it will be processed into the "connection"
  * SSL context, but no reply will be generated until SSL_accept() is called
- * on the next context.
+ * on this new context.
  *
- * This should be done *after* creating the application creates a
- * new socket on which to reply, which should be bind(2)ed and connect(2)ed
- * to the client based upon BIO_dgram_get_peer/BIO_dgram_get_addr.
+ * The application should have passed in a socket of the right type
+ * as nfd.  This is done so that the socket can be appropriate connected
+ * to whatever event loop machinery might be living on top of this
+ * library.
+ *
+ * This routine will then pull the local (sockname) and remote (peername) address
+ * out of the buffer used by the unconnected socket, and will bind/connect the
+ * new socket to that address.
  *
  */
 int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
@@ -965,29 +971,15 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
 
     if (!rbio || !wbio) {
         SSLerr(SSL_F_DTLSV1_LISTEN, SSL_R_BIO_NOT_SET);
+        printf("!rbio or !wbio\n");
         return -1;
     }
 
-    if((ret = DTLSv1_answerHello(serv, rbio, wbio)) != 1) {
+    if((ret = DTLSv1_answerHello(serv, connection, rbio, wbio)) != 1) {
       goto end;
     }
 
-    /* At this point, there is a real ClientHello in serv->init_buf */
-
-    /*
-     * We need to move the init_buf over to connection, set up
-     * a new socket, and then call SSL_accept() on the new SSL
-     */
-    rb = &connection->rlayer.rbuf;
-    if (rb->buf == NULL) {
-      if (!ssl3_setup_read_buffer(connection)) {
-          goto end;
-      }
-    }
-
-    memcpy(rb->buf, serv->init_buf->data, serv->init_num);
-    rb->offset = 0;
-    rb->left   = serv->init_num;
+    /* At this point, there is a real ClientHello in connection->init_buf */
 
     /*
      * Set expected sequence numbers to continue the handshake.
