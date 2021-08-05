@@ -13,6 +13,7 @@
 #include <openssl/objects.h>
 #include <openssl/rand.h>
 #include "ssl_local.h"
+#include "record/record_local.h"
 
 static void get_current_time(struct timeval *t);
 static int dtls1_handshake_write(SSL *s);
@@ -444,7 +445,7 @@ static void get_current_time(struct timeval *t)
 #define LISTEN_SEND_VERIFY_REQUEST  1
 
 #ifndef OPENSSL_NO_SOCK
-int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
+int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
 {
     int next, n;
     BUF_MEM *bufm;
@@ -883,7 +884,7 @@ int DTLSv1_listen(SSL *s, BIO_ADDR *client)
         return -1;
     }
 
-    if((ret = DTLSv1_answerHello(s, rbio, wbio)) != 1) {
+    if((ret = DTLSv1_answerHello(s, s, rbio, wbio)) != 1) {
       goto end;
     }
 
@@ -974,7 +975,7 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
         return -1;
     }
 
-    if((ret = DTLSv1_answerHello(serv, rbio, wbio)) != 1) {
+    if((ret = DTLSv1_answerHello(serv, connection, rbio, wbio)) != 1) {
       goto end;
     }
 
