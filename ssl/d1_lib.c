@@ -474,6 +474,10 @@ int DTLSv1_answerHello(SSL *s, BIO *rbio, BIO *wbio)
         /* SSLerr already called */
         return -1;
     }
+    if (s == as || !ssl3_setup_buffers(as)) {
+        /* SSLerr already called */
+        return -1;
+    }
     if (s->init_buf == NULL) {
         if ((bufm = BUF_MEM_new()) == NULL) {
             SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_MALLOC_FAILURE);
