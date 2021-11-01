@@ -849,7 +849,7 @@ static long dgram_ctrl(BIO *b, int cmd, long num, void *ptr)
         break;
     case BIO_CTRL_DGRAM_GET_PEER:
         if(data->peer.sa.sa_family == 0) {
-          socklen_t addr_len = sizeof(data->peer);
+          addr_len = sizeof(data->peer);
 
           if (getpeername(b->num, &data->peer.sa, &addr_len) < 0) {
             ret = 0;
