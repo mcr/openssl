@@ -234,3 +234,6 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf,
 void dtls1_reset_seq_numbers(SSL *s, int rw);
 int dtls_buffer_listen_record(SSL *s, size_t len, unsigned char *seq,
                               size_t off);
+
+int dtls1_buffer_unshift(SSL *s,
+                         unsigned char *buf, size_t buflen);
