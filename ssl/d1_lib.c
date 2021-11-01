@@ -849,7 +849,7 @@ int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
     } while (next != LISTEN_SUCCESS);
 
     /* Buffer the record in the processed_rcds queue */
-    if (!dtls_buffer_listen_record(s, reclen, seq, align))
+    if (!dtls_buffer_listen_record(as, reclen, seq, align))
         return -1;
 
     BIO_ADDR_free(tmpclient);
