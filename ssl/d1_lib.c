@@ -955,6 +955,10 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
         /* Not properly initialized yet */
         SSL_set_accept_state(serv);
     }
+    if (connection->handshake_func == NULL) {
+        /* Not properly initialized yet */
+        SSL_set_accept_state(connection);
+    }
 
     /* Ensure there is no state left over from a previous invocation */
     if (!SSL_clear(serv)) {
