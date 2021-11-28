@@ -444,6 +444,11 @@ static void get_current_time(struct timeval *t)
 #define LISTEN_SUCCESS              2
 #define LISTEN_SEND_VERIFY_REQUEST  1
 
+int DTLSv1_welcome(void)
+{
+  fprintf(stderr, "Running MCR modified!\n");
+}
+
 #ifndef OPENSSL_NO_SOCK
 static int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
 {
