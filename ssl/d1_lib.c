@@ -445,7 +445,7 @@ static void get_current_time(struct timeval *t)
 #define LISTEN_SEND_VERIFY_REQUEST  1
 
 #ifndef OPENSSL_NO_SOCK
-int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
+static int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
 {
     int next, n;
     BUF_MEM *bufm;
@@ -478,20 +478,7 @@ int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
         /* SSLerr already called */
         return -1;
     }
-    if (s->init_buf == NULL) {
-        if ((bufm = BUF_MEM_new()) == NULL) {
-            SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_MALLOC_FAILURE);
-            return -1;
-        }
-
-        if (!BUF_MEM_grow(bufm, SSL3_RT_MAX_PLAIN_LENGTH)) {
-            BUF_MEM_free(bufm);
-            SSLerr(SSL_F_DTLSV1_LISTEN, ERR_R_MALLOC_FAILURE);
-            return -1;
-        }
-        s->init_buf = bufm;
-    }
-    buf = (unsigned char *)s->init_buf->data;
+    buf = RECORD_LAYER_get_rbuf(&s->rlayer)->buf;
     wbuf = RECORD_LAYER_get_wbuf(&s->rlayer)[0].buf;
 
 #if defined(SSL3_ALIGN_PAYLOAD)
@@ -847,6 +834,21 @@ int DTLSv1_answerHello(SSL *s, SSL *as, BIO *rbio, BIO *wbio)
         }
     } while (next != LISTEN_SUCCESS);
 
+
+    if(s != as) {
+      unsigned char *asbuf= RECORD_LAYER_get_rbuf(&as->rlayer)->buf;
+
+      asbuf += align;
+      memcpy(asbuf, buf, n);
+      /* tell caller size of data in s->init_buf->data */
+      as->init_num = n;
+
+      //fprintf(stderr, "data copied: %d\n", n);
+      //BIO_dump_fp(stderr, buf, n);
+      //BIO_dump_fp(stderr, asbuf, n);
+    }
+
+    //fprintf(stderr, "calling buffer_listen_record with as: %p vs %p\n", as, s);
     /* Buffer the record in the processed_rcds queue */
     if (!dtls_buffer_listen_record(as, reclen, seq, align))
         return -1;
@@ -978,23 +980,6 @@ int DTLSv1_accept(SSL *serv, SSL *connection, BIO_ADDR *client, int nfd)
     if((ret = DTLSv1_answerHello(serv, connection, rbio, wbio)) != 1) {
       goto end;
     }
-
-    /* At this point, there is a real ClientHello in serv->init_buf */
-
-    /*
-     * We need to move the init_buf over to connection, set up
-     * a new socket, and then call SSL_accept() on the new SSL
-     */
-    rb = &connection->rlayer.rbuf;
-    if (rb->buf == NULL) {
-      if (!ssl3_setup_read_buffer(connection)) {
-          goto end;
-      }
-    }
-
-    memcpy(rb->buf, serv->init_buf->data, serv->init_num);
-    rb->offset = 0;
-    rb->left   = serv->init_num;
 
     /*
      * Set expected sequence numbers to continue the handshake.
