@@ -14,9 +14,10 @@
 #include <stdio.h>
 #include <errno.h>
 
-// MCR try just this: #include "bio_local.h"
 /* this is needed on Linux to get in6_pktinfo to be defined */
+#ifndef __USE_GNU
 #define __USE_GNU
+#endif
 
 /* this is needed on OSX to get IPV6_PKTINFO defined */
 #ifdef __APPLE__
@@ -35,7 +36,7 @@
 #include <errno.h>
 #include <signal.h>
 
-#include "bio_lcl.h"
+#include "bio_local.h"
 
 #ifndef OPENSSL_NO_DGRAM
 
