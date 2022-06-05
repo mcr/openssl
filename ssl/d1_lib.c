@@ -446,7 +446,7 @@ static void get_current_time(struct timeval *t)
 
 int DTLSv1_welcome(void)
 {
-  fprintf(stderr, "Running MCR modified!\n");
+  fprintf(stdout, "Running MCR modified %s!\n", __DATE__);
 }
 
 #ifndef OPENSSL_NO_SOCK
