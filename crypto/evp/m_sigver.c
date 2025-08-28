@@ -144,10 +144,12 @@ static int do_sigver_init(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx,
 
         switch (iter) {
         case 1:
-            signature = EVP_SIGNATURE_fetch(locpctx->libctx, supported_sig,
-                                            locpctx->propquery);
-            if (signature != NULL)
-                tmp_prov = EVP_SIGNATURE_get0_provider(signature);
+            if(locpctx->libctx || locpctx->propquery) {
+                signature = EVP_SIGNATURE_fetch(locpctx->libctx, supported_sig,
+                                                locpctx->propquery);
+                if (signature != NULL)
+                    tmp_prov = EVP_SIGNATURE_get0_provider(signature);
+            }
             break;
         case 2:
             tmp_prov = EVP_KEYMGMT_get0_provider(locpctx->keymgmt);
